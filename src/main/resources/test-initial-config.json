@@ -51,10 +51,10 @@
     } ]
   }],
   "virtualhostnodes" : [ {
-    "name" : "default",
+    "name" : "${qpid.node.name}",
     "type" : "JSON",
     "defaultVirtualHostNode" : "true",
-    "virtualHostInitialConfiguration" : "{\"type\": \"BDB\"}",
+    "virtualHostInitialConfiguration" : "{\"type\": \"BDB\",\"nodeAutoCreationPolicies\":[{\"pattern\":\".*\",\"createdOnPublish\":\"true\",\"createdOnConsume\":\"true\",\"nodeType\":\"queue\",\"attributes\":{}}]}",
     "preferenceStoreAttributes": {"type": "Noop"}
   }]
 }

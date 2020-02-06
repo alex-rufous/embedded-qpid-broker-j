@@ -26,7 +26,6 @@ import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
@@ -52,12 +51,8 @@ import org.apache.qpid.server.SystemLauncher;
 import org.apache.qpid.server.SystemLauncherListener;
 import org.apache.qpid.server.configuration.IllegalConfigurationException;
 import org.apache.qpid.server.model.Container;
-import org.apache.qpid.server.model.Exchange;
 import org.apache.qpid.server.model.Port;
-import org.apache.qpid.server.model.Queue;
 import org.apache.qpid.server.model.SystemConfig;
-import org.apache.qpid.server.model.VirtualHost;
-import org.apache.qpid.server.model.VirtualHostNode;
 import org.apache.qpid.server.model.port.AmqpPort;
 
 public class InitialConfigurationBrokerExample
@@ -68,15 +63,15 @@ public class InitialConfigurationBrokerExample
     private static final String PREFERENCES_NOOP = "{\"type\": \"Noop\"}";
     private static final URL INITIAL_CONFIGURATION =
             InitialConfigurationBrokerExample.class.getClassLoader().getResource("test-initial-config.json");
-    private static final String DEFAULT_DIRECT_EXCHANGE = "amq.direct";
     private static final String USERNAME = "guest";
     private static final String PASSWORD = "guest";
     private static final String QUEUE_NAME = "test";
+    private static final String VIRTUAL_HOST_NAME = "default";
 
     public static void main(String[] args) throws Exception
     {
         final InitialConfigurationBrokerExample example = new InitialConfigurationBrokerExample();
-        example.startBroker(example::createQueueAndSendAndReceiveMessage);
+        example.startBroker(example::sendAndReceive);
     }
 
     private void startBroker(Consumer<Container<?>> brokerOperation) throws IOException
@@ -110,12 +105,6 @@ public class InitialConfigurationBrokerExample
         }
     }
 
-    private void createQueueAndSendAndReceiveMessage(final Container<?> container)
-    {
-        createAndBindTestQueue(container);
-        sendAndReceive(container);
-    }
-
     private void sendAndReceive(final Container<?> container)
     {
         final int boundPort = container.getChildren(Port.class)
@@ -128,46 +117,15 @@ public class InitialConfigurationBrokerExample
 
         LOGGER.info("Found amqp port {}", boundPort);
 
-        final VirtualHost<?> virtualHost = getVirtualHost(container);
         try
         {
-            ConnectionFactory factory = getConnectionFactory(boundPort, virtualHost.getName());
+            ConnectionFactory factory = getConnectionFactory(boundPort);
             sendAndReceive(factory);
         }
         catch (NamingException | JMSException e)
         {
             LOGGER.error("Cannot send and receive message", e);
         }
-    }
-
-    private void createAndBindTestQueue(final Container<?> container)
-    {
-        final VirtualHost<?> virtualHost = getVirtualHost(container);
-        final Queue<?> queue = virtualHost.createChild(Queue.class, Collections.singletonMap(Queue.NAME, QUEUE_NAME));
-
-        LOGGER.info("Queue '{}' is created", QUEUE_NAME);
-
-        @SuppressWarnings("unchecked")
-        final Exchange<?> exchange = (Exchange<?>) virtualHost.findConfiguredObject(Exchange.class, DEFAULT_DIRECT_EXCHANGE);
-
-        exchange.bind(queue.getName(), queue.getName(), null, false);
-
-        LOGGER.info("Queue '{}' is bound to exchange '{}'", QUEUE_NAME, DEFAULT_DIRECT_EXCHANGE);
-    }
-
-    private VirtualHost<?> getVirtualHost(final Container<?> container)
-    {
-        final VirtualHost<?> virtualHost = container.getChildren(VirtualHostNode.class)
-                                                    .stream()
-                                                    .findFirst()
-                                                    .orElseThrow(() -> new IllegalConfigurationException(
-                                                            "Cannot find virtual host node"))
-                                                    .getVirtualHost();
-        if (virtualHost == null)
-        {
-            throw new IllegalConfigurationException("Cannot find virtual host");
-        }
-        return virtualHost;
     }
 
     private Container<?> createBrokerContainer(final File workDir)
@@ -180,6 +138,7 @@ public class InitialConfigurationBrokerExample
         context.put("qpid.broker.defaultPreferenceStoreAttributes", PREFERENCES_NOOP);
         context.put("qpid.user.name", USERNAME);
         context.put("qpid.user.password", PASSWORD);
+        context.put("qpid.node.name", VIRTUAL_HOST_NAME);
 
         final Map<String, Object> attributes = new HashMap<>();
         attributes.put("type", "JSON");
@@ -201,11 +160,12 @@ public class InitialConfigurationBrokerExample
         return containerDiscoverer.getContainer();
     }
 
-    private ConnectionFactory getConnectionFactory(int port, final String virtualhost) throws NamingException
+    private ConnectionFactory getConnectionFactory(int port) throws NamingException
     {
         Properties properties = new Properties();
         properties.put("java.naming.factory.initial", "org.apache.qpid.jms.jndi.JmsInitialContextFactory");
-        properties.put("connectionfactory.qpidConnectionFactory", String.format("amqp://localhost:%d?amqp.vhost=%s", port, virtualhost));
+        properties.put("connectionfactory.qpidConnectionFactory",
+                       String.format("amqp://localhost:%d?amqp.vhost=%s", port, VIRTUAL_HOST_NAME));
         Context context = new InitialContext(properties);
         try
         {
@@ -219,14 +179,13 @@ public class InitialConfigurationBrokerExample
 
     private void sendAndReceive(final ConnectionFactory connectionFactory) throws JMSException
     {
-        Connection connection = connectionFactory.createConnection(InitialConfigurationBrokerExample.USERNAME,
-                                                                   InitialConfigurationBrokerExample.PASSWORD);
+        Connection connection = connectionFactory.createConnection(USERNAME, PASSWORD);
         try
         {
             connection.start();
 
             Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
-            Destination destination = session.createQueue(InitialConfigurationBrokerExample.QUEUE_NAME);
+            Destination destination = session.createQueue(QUEUE_NAME);
 
             MessageProducer messageProducer = session.createProducer(destination);
             MessageConsumer messageConsumer = session.createConsumer(destination);
